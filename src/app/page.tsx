@@ -47,17 +47,6 @@ interface WebSocketMessage {
   data: any;
 }
 
-// Alert icon component
-const AlertIcon = () => (
-  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-    <path
-      fillRule="evenodd"
-      d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-      clipRule="evenodd"
-    />
-  </svg>
-);
-
 export default function Home() {
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
   const wsUrl = backendUrl.replace("http://", "ws://").replace("https://", "wss://") + "/events";
@@ -65,13 +54,11 @@ export default function Home() {
   const [systemState, setSystemState] = useState<SystemState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [triggering, setTriggering] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [demoMode, setDemoMode] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
   const [selectedWarRoom, setSelectedWarRoom] = useState<WarRoom | null>(null);
   const [isWarRoomModalOpen, setIsWarRoomModalOpen] = useState(false);
@@ -104,25 +91,6 @@ export default function Home() {
     }
   }, [backendUrl, showNotification]);
 
-  const triggerSimulation = useCallback(async () => {
-    try {
-      setTriggering(true);
-      setError(null);
-      const response = await fetch(`${backendUrl}/trigger`, {
-        method: "POST",
-      });
-      if (!response.ok) throw new Error("Failed to trigger simulation");
-      const data = await response.json();
-      showNotification("Simulation triggered successfully", "success");
-      setTimeout(() => fetchState(), 1000);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to trigger simulation";
-      setError(errorMsg);
-      showNotification(errorMsg, "error");
-    } finally {
-      setTriggering(false);
-    }
-  }, [backendUrl, showNotification, fetchState]);
 
   const resetSystem = useCallback(async () => {
     try {
@@ -269,46 +237,9 @@ export default function Home() {
   }, [connected, wsError]);
 
 
-  // Demo mode auto-trigger (trigger once, then turn off)
-  useEffect(() => {
-    if (demoMode) {
-      // Trigger once and then disable demo mode
-      triggerSimulation();
-      showNotification("Demo simulation triggered", "info");
-      
-      // Auto-disable demo mode after triggering
-      setTimeout(() => {
-        setDemoMode(false);
-      }, 500);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demoMode]); // Only depend on demoMode
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      
-      if (e.code === "Space" && !triggering && !resetting) {
-        e.preventDefault();
-        triggerSimulation();
-      } else if (e.code === "KeyR" && !resetting && !triggering) {
-        e.preventDefault();
-        resetSystem();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyPress);
-    return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [triggering, resetting, triggerSimulation, resetSystem]);
-
   useEffect(() => {
     fetchState();
   }, [fetchState]);
-
-  const hasActiveIncident = systemState?.agents.some((agent) => agent.status === "incident") || false;
 
   const handleWarRoomClick = (warRoom: WarRoom) => {
     setSelectedWarRoom(warRoom);
@@ -337,33 +268,10 @@ export default function Home() {
                 Workflows
               </a>
 
-              {/* Demo Mode Toggle */}
-              <label className="flex items-center gap-2 cursor-pointer text-sm">
-                <input
-                  type="checkbox"
-                  checked={demoMode}
-                  onChange={(e) => setDemoMode(e.target.checked)}
-                  className="w-4 h-4 rounded border-input"
-                />
-                <span className="text-muted-foreground hidden sm:inline">Demo Mode</span>
-              </label>
-
-              {/* Trigger Button */}
-              <Button
-                onClick={triggerSimulation}
-                disabled={triggering || resetting || hasActiveIncident}
-                size="default"
-                variant={hasActiveIncident ? "destructive" : "default"}
-                className="gap-2"
-              >
-                {hasActiveIncident && <AlertIcon />}
-                {triggering ? "Triggering..." : hasActiveIncident ? "Incident Active" : "Trigger Incident"}
-              </Button>
-
               {/* Reset Button */}
               <Button
                 onClick={resetSystem}
-                disabled={resetting || triggering}
+                disabled={resetting}
                 variant="ghost"
                 size="default"
               >
