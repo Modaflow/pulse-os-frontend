@@ -7,7 +7,6 @@ import { Card } from "@/components/ui/card";
 import AgentCard from "@/components/agent-card";
 import TimelineFeed from "@/components/timeline-feed";
 import WarRoomModal from "@/components/war-room-modal";
-import TwitterConfirmationDialog from "@/components/twitter-confirmation-dialog";
 
 interface AgentState {
   name: string;
@@ -78,11 +77,7 @@ export default function Home() {
   const [isWarRoomModalOpen, setIsWarRoomModalOpen] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [twitterDialogOpen, setTwitterDialogOpen] = useState(false);
-  const [pendingIncident, setPendingIncident] = useState<{ incidentId: string; prId?: string } | null>(null);
-  const [isPostingTweet, setIsPostingTweet] = useState(false);
   
-  const demoIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPingRef = useRef<number>(0);
   
@@ -92,58 +87,6 @@ export default function Home() {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   }, []);
-
-  const handleTweetConfirm = useCallback(async () => {
-    if (!pendingIncident) return;
-    
-    setIsPostingTweet(true);
-    try {
-      const response = await fetch(`${backendUrl}/agents/gary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          incident_id: pendingIncident.incidentId,
-          pr_id: pendingIncident.prId,
-          post_tweet: true,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to post tweet");
-      }
-
-      showNotification("Tweet posted successfully!", "success");
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to post tweet";
-      showNotification(errorMsg, "error");
-    } finally {
-      setIsPostingTweet(false);
-      setPendingIncident(null);
-    }
-  }, [pendingIncident, backendUrl, showNotification]);
-
-  const handleTweetSkip = useCallback(async () => {
-    if (!pendingIncident) return;
-    
-    try {
-      // Optionally call Gary endpoint without posting tweet
-      // Or just skip entirely - Gary already announced via Slack
-      await fetch(`${backendUrl}/agents/gary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          incident_id: pendingIncident.incidentId,
-          pr_id: pendingIncident.prId,
-          post_tweet: false,
-        }),
-      });
-    } catch (err) {
-      // Silently fail - this is optional
-      console.error("Failed to skip tweet:", err);
-    } finally {
-      setPendingIncident(null);
-    }
-  }, [pendingIncident, backendUrl]);
 
   const fetchState = useCallback(async () => {
     try {
@@ -259,23 +202,10 @@ export default function Home() {
           break;
 
         case "timeline_event":
-          console.log("📝 Timeline event received:", msg.data);
-          const event = msg.data as TimelineEvent;
           setTimelineEvents((prev) => {
-            const newEvents = [...prev, event];
-            console.log("📋 Total timeline events:", newEvents.length);
+            const newEvents = [...prev, msg.data as TimelineEvent];
             return newEvents.slice(-50);
           });
-          
-          // Check if Gary is announcing a resolution and Twitter is configured
-          if (event.agent === "Gary" && event.action === "announce" && event.data?.incident_id) {
-            // Show Twitter confirmation dialog
-            setPendingIncident({
-              incidentId: event.data.incident_id,
-              prId: event.data.pr_id,
-            });
-            setTwitterDialogOpen(true);
-          }
           break;
 
         case "system_reset":
@@ -689,20 +619,6 @@ export default function Home() {
         agents={systemState?.agents || []}
         timelineEvents={timelineEvents}
       />
-
-      {/* Twitter Confirmation Dialog */}
-      {pendingIncident && (
-        <TwitterConfirmationDialog
-          open={twitterDialogOpen}
-          onOpenChange={setTwitterDialogOpen}
-          incidentId={pendingIncident.incidentId}
-          prId={pendingIncident.prId}
-          tweetText={`✅ Incident resolved! Checkout issue fixed via PR ${pendingIncident.prId?.substring(0, 8) || 'N/A'}. All systems operational. #PulseOS`}
-          onConfirm={handleTweetConfirm}
-          onSkip={handleTweetSkip}
-          isPosting={isPostingTweet}
-        />
-      )}
     </div>
   );
 }

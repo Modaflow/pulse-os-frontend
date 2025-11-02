@@ -39,6 +39,7 @@ export default function EditWorkflowPage() {
   const [form, setForm] = useState<WorkflowForm | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -81,6 +82,47 @@ export default function EditWorkflowPage() {
       alert("Failed to save workflow");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    try {
+      setTesting(true);
+      
+      // Mock GitHub issue for testing
+      const mockTriggerData = {
+        issue: {
+          number: 999,
+          title: "Test Issue: Button not working",
+          body: "When I click the submit button in the checkout form, nothing happens. No errors in console.",
+          html_url: "https://github.com/test/test/issues/999",
+          labels: [{ name: "bug" }],
+          user: { login: "test-user" }
+        },
+        action: "opened"
+      };
+      
+      const response = await fetch(`${backendUrl}/workflows/${workflowId}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mockTriggerData),
+      });
+
+      if (!response.ok) throw new Error("Failed to execute workflow");
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        alert("Workflow test started! Check the dashboard for real-time updates.");
+        router.push("/");
+      } else {
+        alert("Workflow execution failed");
+      }
+    } catch (err) {
+      console.error("Failed to test workflow:", err);
+      alert("Failed to test workflow");
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -142,10 +184,17 @@ export default function EditWorkflowPage() {
               <h1 className="text-2xl font-bold text-foreground">Edit Workflow</h1>
             </div>
             <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                onClick={handleTest} 
+                disabled={testing || saving}
+              >
+                {testing ? "Testing..." : "Test Workflow"}
+              </Button>
               <Link href="/workflows">
                 <Button variant="ghost">Cancel</Button>
               </Link>
-              <Button onClick={handleSave} disabled={saving}>
+              <Button onClick={handleSave} disabled={saving || testing}>
                 {saving ? "Saving..." : "Save Changes"}
               </Button>
             </div>
