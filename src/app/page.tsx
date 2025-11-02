@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 export default function Home() {
   const [data, setData] = useState<{ message?: string } | null>(null);
@@ -8,7 +11,11 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("http://localhost:8000/")
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+    if (!backendUrl) {
+      return;
+    }
+    fetch(backendUrl)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch");
         return res.json();
