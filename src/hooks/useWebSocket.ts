@@ -58,9 +58,15 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           }
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
           if (mounted) {
             setConnected(false);
+            // Provide more detailed error information
+            if (event.code !== 1000) { // 1000 is normal closure
+              const errorMsg = event.reason || `Connection closed (code: ${event.code})`;
+              setError(errorMsg);
+              console.error("WebSocket closed:", { code: event.code, reason: event.reason, wasClean: event.wasClean });
+            }
             // Attempt to reconnect
             if (reconnectAttempts.current < maxReconnectAttempts) {
               reconnectAttempts.current += 1;
@@ -68,7 +74,8 @@ export function useWebSocket(url: string): UseWebSocketReturn {
                 connect();
               }, 1000 * reconnectAttempts.current); // Exponential backoff
             } else {
-              setError("Failed to reconnect after multiple attempts");
+              const finalError = event.reason || `Failed to reconnect after ${maxReconnectAttempts} attempts`;
+              setError(finalError);
             }
           }
         };
