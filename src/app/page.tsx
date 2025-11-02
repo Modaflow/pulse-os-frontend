@@ -416,13 +416,13 @@ export default function Home() {
                   <button
                     key={agent}
                     onClick={() => setAgentFilter(agent.toLowerCase())}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                    className={`px-3 py-1 text-sm rounded-md transition-colors cursor-pointer ${
                       agentFilter === agent.toLowerCase()
                         ? "bg-primary text-primary-foreground font-medium"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted"
                     }`}
                   >
-                    {agent}
+                    {agent === "all" ? "All" : agent}
                   </button>
                 ))}
               </div>
@@ -436,7 +436,7 @@ export default function Home() {
                   <button
                     key={severity}
                     onClick={() => setSeverityFilter(severity)}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                    className={`px-3 py-1 text-sm rounded-md transition-colors cursor-pointer ${
                       severityFilter === severity
                         ? "bg-primary text-primary-foreground font-medium"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -504,22 +504,30 @@ export default function Home() {
                   </Card>
                 ))
               ) : systemState ? (
-                systemState.agents.map((agent) => (
-                  <AgentCard
-                    key={agent.name}
-                    name={agent.name as "Phill" | "Carl" | "Gary"}
-                    status={agent.status}
-                    domain={agent.domain}
-                    war_room_id={agent.war_room_id}
-                    last_change={agent.last_change}
-                    onOpenWarRoom={() => {
-                      if (agent.war_room_id) {
-                        const warRoom = systemState.war_rooms.find(wr => wr.id === agent.war_room_id);
-                        if (warRoom) handleWarRoomClick(warRoom);
-                      }
-                    }}
-                  />
-                ))
+                systemState.agents
+                  .filter((agent) => {
+                    // Apply agent filter
+                    if (agentFilter !== "all" && agent.name.toLowerCase() !== agentFilter) {
+                      return false;
+                    }
+                    return true;
+                  })
+                  .map((agent) => (
+                    <AgentCard
+                      key={agent.name}
+                      name={agent.name as "Phill" | "Carl" | "Gary"}
+                      status={agent.status}
+                      domain={agent.domain}
+                      war_room_id={agent.war_room_id}
+                      last_change={agent.last_change}
+                      onOpenWarRoom={() => {
+                        if (agent.war_room_id) {
+                          const warRoom = systemState.war_rooms.find(wr => wr.id === agent.war_room_id);
+                          if (warRoom) handleWarRoomClick(warRoom);
+                        }
+                      }}
+                    />
+                  ))
               ) : null}
             </div>
 
