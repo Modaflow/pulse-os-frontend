@@ -1,9 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 export default function Home() {
   const [data, setData] = useState<{ message?: string } | null>(null);
@@ -13,6 +10,8 @@ export default function Home() {
   useEffect(() => {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
     if (!backendUrl) {
+      setError("NEXT_PUBLIC_BACKEND_URL is not configured");
+      setLoading(false);
       return;
     }
     fetch(backendUrl)
