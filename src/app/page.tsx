@@ -332,6 +332,14 @@ export default function Home() {
 
             {/* Right: Controls */}
             <div className="flex items-center gap-3">
+              {/* Workflows Link */}
+              <a
+                href="/workflows"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
+              >
+                Workflows
+              </a>
+
               {/* Demo Mode Toggle */}
               <label className="flex items-center gap-2 cursor-pointer text-sm">
                 <input
