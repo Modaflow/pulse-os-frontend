@@ -203,8 +203,10 @@ export default function Home() {
           break;
 
         case "timeline_event":
+          console.log("📝 Timeline event received:", msg.data);
           setTimelineEvents((prev) => {
             const newEvents = [...prev, msg.data as TimelineEvent];
+            console.log("📋 Total timeline events:", newEvents.length);
             return newEvents.slice(-50);
           });
           break;
@@ -270,33 +272,20 @@ export default function Home() {
   }, [connected, wsError]);
 
 
-  // Demo mode auto-trigger
+  // Demo mode auto-trigger (trigger once, then turn off)
   useEffect(() => {
     if (demoMode) {
-      // Trigger immediately when demo mode is enabled
+      // Trigger once and then disable demo mode
       triggerSimulation();
+      showNotification("Demo simulation triggered", "info");
       
-      // Then set up interval for subsequent triggers
-      demoIntervalRef.current = setInterval(() => {
-        // Only auto-trigger if no active incident
-        if (!systemState?.agents.some((agent) => agent.status === "incident")) {
-          triggerSimulation();
-        }
-      }, 15000); // Reduced to 15 seconds for better demo experience
-      
-      showNotification("Demo mode enabled - auto-triggering incidents every 15s", "info");
-    } else {
-      if (demoIntervalRef.current) {
-        clearInterval(demoIntervalRef.current);
-        demoIntervalRef.current = null;
-      }
+      // Auto-disable demo mode after triggering
+      setTimeout(() => {
+        setDemoMode(false);
+      }, 500);
     }
-    return () => {
-      if (demoIntervalRef.current) {
-        clearInterval(demoIntervalRef.current);
-      }
-    };
-  }, [demoMode]); // Removed triggerSimulation from deps to avoid interval resets
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoMode]); // Only depend on demoMode
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -339,30 +328,6 @@ export default function Home() {
             <div>
               <h1 className="text-2xl font-bold text-foreground">PulseOS</h1>
               <p className="text-xs text-muted-foreground">Incident control</p>
-            </div>
-
-            {/* Center: Connection Status */}
-            <div className="hidden md:flex items-center gap-2">
-              <div className="relative group">
-                <div className="flex items-center gap-2 text-sm cursor-help">
-                  <div
-                    className={`w-2.5 h-2.5 rounded-full transition-all ${
-                      connected && !isReconnecting
-                        ? "bg-green-500 shadow-lg shadow-green-500/50"
-                        : "bg-amber-500 animate-pulse"
-                    }`}
-                  />
-                  <span className="text-muted-foreground font-medium">
-                    {connected && !isReconnecting ? "Connected" : "Reconnecting…"}
-                  </span>
-                </div>
-                {/* Latency Tooltip */}
-                {latency !== null && (
-                  <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                    Latency: {latency}ms
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* Right: Controls */}
@@ -523,7 +488,20 @@ export default function Home() {
                       onOpenWarRoom={() => {
                         if (agent.war_room_id) {
                           const warRoom = systemState.war_rooms.find(wr => wr.id === agent.war_room_id);
-                          if (warRoom) handleWarRoomClick(warRoom);
+                          if (warRoom) {
+                            handleWarRoomClick(warRoom);
+                          } else {
+                            // War room exists but not in active list - create a minimal object
+                            const mockWarRoom: WarRoom = {
+                              id: agent.war_room_id,
+                              participants: [agent.name],
+                              status: "active",
+                              incident_id: null,
+                              created_at: new Date().toISOString(),
+                              closed_at: null,
+                            };
+                            handleWarRoomClick(mockWarRoom);
+                          }
                         }
                       }}
                     />
