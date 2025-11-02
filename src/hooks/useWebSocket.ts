@@ -44,6 +44,7 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           if (mounted) {
             try {
               const message: WebSocketMessage = JSON.parse(event.data);
+              console.log("📨 WebSocket message received:", message); // Debug logging
               setMessages((prev) => [...prev, message].slice(-100)); // Keep last 100 messages
             } catch (err) {
               console.error("Failed to parse WebSocket message:", err);

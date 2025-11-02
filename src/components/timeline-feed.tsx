@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 interface TimelineEvent {
   agent: string
@@ -11,13 +12,15 @@ interface TimelineEvent {
   action: string
   message: string
   timestamp: string
+  severity?: "high" | "medium" | "low"
   data?: Record<string, any>
 }
 
 interface TimelineFeedProps {
   events: TimelineEvent[]
-  filter: string
-  onFilterChange: (filter: string) => void
+  agentFilter: string
+  severityFilter: string
+  searchQuery: string
   onClear: () => void
 }
 
@@ -27,65 +30,110 @@ const agentColors: Record<string, { bg: string; text: string; dot: string }> = {
   Gary: { bg: "bg-green-50", text: "text-green-700", dot: "bg-green-500" },
 }
 
-export default function TimelineFeed({ events, filter, onFilterChange, onClear }: TimelineFeedProps) {
+const severityColors = {
+  high: "bg-red-100 text-red-700 border-red-300",
+  medium: "bg-amber-100 text-amber-700 border-amber-300",
+  low: "bg-blue-100 text-blue-700 border-blue-300",
+}
+
+export default function TimelineFeed({ 
+  events, 
+  agentFilter, 
+  severityFilter, 
+  searchQuery, 
+  onClear 
+}: TimelineFeedProps) {
   const timelineEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
 
   const formatTimestamp = (timestamp: string) => {
     try {
       const date = new Date(timestamp)
-      return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
+      return date.toLocaleTimeString("en-US", { 
+        hour: "2-digit", 
+        minute: "2-digit", 
+        second: "2-digit" 
+      })
     } catch {
       return timestamp
     }
   }
 
   const filteredEvents = events.filter((event) => {
-    if (filter === "all") return true
-    return event.agent === filter
+    // Agent filter
+    if (agentFilter !== "all" && event.agent.toLowerCase() !== agentFilter) {
+      return false
+    }
+
+    // Severity filter
+    if (severityFilter !== "all" && event.severity !== severityFilter) {
+      return false
+    }
+
+    // Search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      return (
+        event.message.toLowerCase().includes(query) ||
+        event.action.toLowerCase().includes(query) ||
+        event.agent.toLowerCase().includes(query) ||
+        event.domain.toLowerCase().includes(query)
+      )
+    }
+
+    return true
   })
 
-  // Auto-scroll to bottom when new events arrive
+  // Detect if user has scrolled up
+  const handleScroll = () => {
+    if (!scrollContainerRef.current) return
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+    setAutoScroll(isAtBottom)
+  }
+
+  // Auto-scroll to bottom when new events arrive (only if user hasn't scrolled up)
   useEffect(() => {
-    timelineEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [filteredEvents])
+    if (autoScroll) {
+      timelineEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [filteredEvents, autoScroll])
 
   return (
-    <Card className="h-full flex flex-col">
-      <div className="p-6 border-b border-border">
+    <Card className="flex flex-col h-[600px]">
+      {/* Header */}
+      <div className="p-4 border-b border-border flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-foreground">Timeline Feed</h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              {filteredEvents.length} event{filteredEvents.length !== 1 ? "s" : ""}
-            </p>
+            <h2 className="text-lg font-semibold text-foreground">
+              Timeline ({filteredEvents.length})
+            </h2>
           </div>
-          <div className="flex gap-2 items-center">
-            <select
-              value={filter}
-              onChange={(e) => onFilterChange(e.target.value)}
-              className="px-3 py-1.5 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            >
-              <option value="all">All Agents</option>
-              <option value="Phill">Phill</option>
-              <option value="Carl">Carl</option>
-              <option value="Gary">Gary</option>
-            </select>
-            <button
-              onClick={onClear}
-              className="px-3 py-1.5 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/80 transition-colors"
-            >
-              Clear
-            </button>
-          </div>
+          <Button
+            onClick={onClear}
+            variant="outline"
+            size="sm"
+            className="text-xs"
+          >
+            Clear
+          </Button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-3">
+      {/* Events List */}
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 space-y-2"
+      >
         {filteredEvents.length === 0 ? (
           <div className="text-center text-muted-foreground py-12">
-            <p className="text-sm">No timeline events</p>
+            <p className="text-sm">No events</p>
             <p className="text-xs mt-1">
-              {filter === "all" ? "Events will appear here as agents act" : `No events for ${filter}`}
+              {agentFilter !== "all" || severityFilter !== "all" || searchQuery
+                ? "Try adjusting your filters"
+                : "Events will appear here as agents act"}
             </p>
           </div>
         ) : (
@@ -94,36 +142,73 @@ export default function TimelineFeed({ events, filter, onFilterChange, onClear }
             return (
               <div
                 key={idx}
-                className={`p-4 rounded-lg border-l-4 transition-all ${agentColor.bg}`}
-                style={{ borderLeftColor: agentColor.dot }}
+                className="relative pl-4 pb-4 border-l-2 last:pb-0"
+                style={{ borderColor: agentColor.dot.replace("bg-", "").replace("500", "300") }}
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className={`w-2 h-2 rounded-full ${agentColor.dot}`}></div>
-                  <Badge variant="secondary" className={`${agentColor.text} bg-transparent border-0 px-0`}>
-                    {event.agent}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">{formatTimestamp(event.timestamp)}</span>
-                </div>
-                <div className="text-sm text-foreground">
-                  <span className="font-medium">{event.action}:</span> {event.message}
-                </div>
-                {event.data && Object.keys(event.data).length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-border/50">
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(event.data).map(([key, value]) => (
-                        <Badge key={key} variant="outline" className="text-xs">
-                          <span className="font-medium">{key}:</span> {String(value)}
-                        </Badge>
-                      ))}
-                    </div>
+                {/* Dot */}
+                <div 
+                  className={`absolute left-0 top-1 -translate-x-1/2 w-3 h-3 rounded-full ${agentColor.dot} ring-4 ring-background`}
+                />
+                
+                {/* Content */}
+                <div className="space-y-1.5">
+                  {/* Title Line */}
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-semibold ${agentColor.text}`}>
+                      {event.agent}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatTimestamp(event.timestamp)}
+                    </span>
                   </div>
-                )}
+
+                  {/* Message */}
+                  <div className="text-sm text-foreground">
+                    {event.message}
+                  </div>
+
+                  {/* Chips */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {event.severity && (
+                      <Badge 
+                        variant="outline" 
+                        className={`text-xs px-2 py-0 ${severityColors[event.severity]}`}
+                      >
+                        severity: {event.severity}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-xs px-2 py-0">
+                      domain: {event.domain}
+                    </Badge>
+                    {event.data && Object.entries(event.data).map(([key, value]) => (
+                      <Badge key={key} variant="outline" className="text-xs px-2 py-0">
+                        {key}: {String(value)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
               </div>
             )
           })
         )}
         <div ref={timelineEndRef} />
       </div>
+
+      {/* Scroll to bottom button (when user scrolled up) */}
+      {!autoScroll && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+          <Button
+            size="sm"
+            onClick={() => {
+              setAutoScroll(true)
+              timelineEndRef.current?.scrollIntoView({ behavior: "smooth" })
+            }}
+            className="shadow-lg"
+          >
+            ↓ New events
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }

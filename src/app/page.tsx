@@ -13,6 +13,7 @@ interface AgentState {
   status: "stable" | "active" | "incident";
   domain: string;
   war_room_id: string | null;
+  last_change?: string;
 }
 
 interface WarRoom {
@@ -36,6 +37,7 @@ interface TimelineEvent {
   action: string;
   message: string;
   timestamp: string;
+  severity?: "high" | "medium" | "low";
   data?: Record<string, any>;
 }
 
@@ -66,13 +68,19 @@ export default function Home() {
   const [triggering, setTriggering] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
-  const [timelineFilter, setTimelineFilter] = useState<string>("all");
+  const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [demoMode, setDemoMode] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
   const [selectedWarRoom, setSelectedWarRoom] = useState<WarRoom | null>(null);
   const [isWarRoomModalOpen, setIsWarRoomModalOpen] = useState(false);
+  const [latency, setLatency] = useState<number | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   
   const demoIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPingRef = useRef<number>(0);
   
   const { connected, messages, error: wsError, send } = useWebSocket(wsUrl);
 
@@ -153,6 +161,7 @@ export default function Home() {
                       ...agent,
                       status: msg.data.status,
                       war_room_id: msg.data.war_room_id || null,
+                      last_change: new Date().toISOString(),
                     }
                   : agent
               ),
@@ -209,6 +218,7 @@ export default function Home() {
                 ...agent,
                 status: "stable" as const,
                 war_room_id: null,
+                last_change: new Date().toISOString(),
               })),
               war_rooms: [],
             };
@@ -217,20 +227,68 @@ export default function Home() {
           setIsWarRoomModalOpen(false);
           showNotification("System reset detected", "info");
           break;
+
+        case "pong":
+          // Calculate latency
+          const now = Date.now();
+          const pingTime = lastPingRef.current;
+          if (pingTime) {
+            const latencyMs = now - pingTime;
+            setLatency(latencyMs);
+          }
+          break;
       }
     });
   }, [messages, showNotification]);
+
+  // Ping interval for latency tracking
+  useEffect(() => {
+    if (!connected) {
+      setLatency(null);
+      return;
+    }
+
+    pingIntervalRef.current = setInterval(() => {
+      lastPingRef.current = Date.now();
+      send(JSON.stringify({ type: "ping", timestamp: new Date().toISOString() }));
+    }, 5000); // Ping every 5 seconds
+
+    return () => {
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+      }
+    };
+  }, [connected, send]);
+
+  // Track reconnection state
+  useEffect(() => {
+    if (!connected && wsError) {
+      setIsReconnecting(true);
+    } else if (connected) {
+      setIsReconnecting(false);
+    }
+  }, [connected, wsError]);
 
 
   // Demo mode auto-trigger
   useEffect(() => {
     if (demoMode) {
+      // Trigger immediately when demo mode is enabled
+      triggerSimulation();
+      
+      // Then set up interval for subsequent triggers
       demoIntervalRef.current = setInterval(() => {
-        triggerSimulation();
-      }, 30000);
+        // Only auto-trigger if no active incident
+        if (!systemState?.agents.some((agent) => agent.status === "incident")) {
+          triggerSimulation();
+        }
+      }, 15000); // Reduced to 15 seconds for better demo experience
+      
+      showNotification("Demo mode enabled - auto-triggering incidents every 15s", "info");
     } else {
       if (demoIntervalRef.current) {
         clearInterval(demoIntervalRef.current);
+        demoIntervalRef.current = null;
       }
     }
     return () => {
@@ -238,7 +296,7 @@ export default function Home() {
         clearInterval(demoIntervalRef.current);
       }
     };
-  }, [demoMode, triggerSimulation]);
+  }, [demoMode]); // Removed triggerSimulation from deps to avoid interval resets
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -274,60 +332,132 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       {/* Sticky Header */}
-      <div className="border-b border-border/50 backdrop-blur-md sticky top-0 z-30 bg-background/80 animate-in fade-in duration-300">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">PulseOS</h1>
-            <p className="text-sm text-muted-foreground">Operational Brain for Incident Management</p>
-          </div>
+      <div className="border-b border-border/50 backdrop-blur-md sticky top-0 z-30 bg-background/80">
+        <div className="max-w-[1600px] mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            {/* Left: Brand */}
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">PulseOS</h1>
+              <p className="text-xs text-muted-foreground">Incident control</p>
+            </div>
 
-          <div className="flex items-center gap-3">
-            {/* Connection Status */}
-            <div className="flex items-center gap-2 text-sm">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  connected ? "bg-green-500 animate-pulse" : "bg-red-500"
-                }`}
-              />
-              <span className="text-muted-foreground">
-                {connected ? "Connected" : "Disconnected"}
-              </span>
-        </div>
+            {/* Center: Connection Status */}
+            <div className="hidden md:flex items-center gap-2">
+              <div className="relative group">
+                <div className="flex items-center gap-2 text-sm cursor-help">
+                  <div
+                    className={`w-2.5 h-2.5 rounded-full transition-all ${
+                      connected && !isReconnecting
+                        ? "bg-green-500 shadow-lg shadow-green-500/50"
+                        : "bg-amber-500 animate-pulse"
+                    }`}
+                  />
+                  <span className="text-muted-foreground font-medium">
+                    {connected && !isReconnecting ? "Connected" : "Reconnecting…"}
+                  </span>
+                </div>
+                {/* Latency Tooltip */}
+                {latency !== null && (
+                  <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                    Latency: {latency}ms
+                  </div>
+                )}
+              </div>
+            </div>
 
-            {/* Demo Mode Toggle */}
-            <label className="flex items-center gap-2 cursor-pointer text-sm">
-              <input
-                type="checkbox"
-                checked={demoMode}
-                onChange={(e) => setDemoMode(e.target.checked)}
-                className="w-4 h-4 rounded border-input"
-              />
-              <span className="text-muted-foreground">Demo</span>
-            </label>
+            {/* Right: Controls */}
+            <div className="flex items-center gap-3">
+              {/* Demo Mode Toggle */}
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  type="checkbox"
+                  checked={demoMode}
+                  onChange={(e) => setDemoMode(e.target.checked)}
+                  className="w-4 h-4 rounded border-input"
+                />
+                <span className="text-muted-foreground hidden sm:inline">Demo Mode</span>
+              </label>
 
-            {/* Trigger Button */}
-            <div className={hasActiveIncident ? "animate-pulse" : ""}>
+              {/* Trigger Button */}
               <Button
-              onClick={triggerSimulation}
+                onClick={triggerSimulation}
                 disabled={triggering || resetting || hasActiveIncident}
-                size="lg"
+                size="default"
                 variant={hasActiveIncident ? "destructive" : "default"}
                 className="gap-2"
               >
                 {hasActiveIncident && <AlertIcon />}
                 {triggering ? "Triggering..." : hasActiveIncident ? "Incident Active" : "Trigger Incident"}
               </Button>
+
+              {/* Reset Button */}
+              <Button
+                onClick={resetSystem}
+                disabled={resetting || triggering}
+                variant="ghost"
+                size="default"
+              >
+                {resetting ? "Resetting..." : "Reset"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Controls Row */}
+      <div className="border-b border-border/50 bg-muted/30">
+        <div className="max-w-[1600px] mx-auto px-4 py-3">
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Agent Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground font-medium">Agent:</span>
+              <div className="flex items-center gap-1 bg-background rounded-lg p-1 border border-border">
+                {["all", "Phill", "Carl", "Gary"].map((agent) => (
+                  <button
+                    key={agent}
+                    onClick={() => setAgentFilter(agent.toLowerCase())}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      agentFilter === agent.toLowerCase()
+                        ? "bg-primary text-primary-foreground font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {agent}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Reset Button */}
-            <Button
-              onClick={resetSystem}
-              disabled={resetting || triggering}
-              variant="outline"
-              size="lg"
-            >
-              {resetting ? "Resetting..." : "Reset"}
-            </Button>
+            {/* Severity Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground font-medium">Severity:</span>
+              <div className="flex items-center gap-1 bg-background rounded-lg p-1 border border-border">
+                {["all", "high", "medium", "low"].map((severity) => (
+                  <button
+                    key={severity}
+                    onClick={() => setSeverityFilter(severity)}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      severityFilter === severity
+                        ? "bg-primary text-primary-foreground font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {severity.charAt(0).toUpperCase() + severity.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="flex-1 min-w-[200px] max-w-md">
+              <input
+                type="text"
+                placeholder="Search timeline..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -350,81 +480,140 @@ export default function Home() {
       )}
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-[1600px] mx-auto px-4 py-6">
         {/* Error Display */}
         {error && (
           <Card className="mb-6 border-red-200 bg-red-50">
             <div className="p-4">
               <p className="text-sm text-red-800">Error: {error}</p>
-          </div>
-          </Card>
-        )}
-
-        {/* Agent Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8 animate-in fade-in">
-          {loading ? (
-            // Skeleton loaders
-            [1, 2, 3].map((i) => (
-              <Card key={i} className="p-6 animate-pulse">
-                <div className="h-4 bg-muted rounded w-24 mb-2"></div>
-                <div className="h-3 bg-muted rounded w-32"></div>
-              </Card>
-            ))
-          ) : systemState ? (
-            systemState.agents.map((agent) => (
-              <div key={agent.name} className="animate-in fade-in duration-300">
-                <AgentCard
-                  name={agent.name as "Phill" | "Carl" | "Gary"}
-                  status={agent.status}
-                  domain={agent.domain}
-                  war_room_id={agent.war_room_id}
-                />
-                  </div>
-            ))
-          ) : null}
-        </div>
-
-        {/* War Rooms Section */}
-        {systemState && systemState.war_rooms.length > 0 && (
-          <Card className="mb-8 animate-in fade-in duration-500 delay-100">
-            <div className="p-6">
-              <h2 className="text-xl font-semibold mb-4 text-foreground">Active War Rooms</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {systemState.war_rooms.map((wr) => (
-                  <button
-                    key={wr.id}
-                    onClick={() => handleWarRoomClick(wr)}
-                    className="text-left p-4 rounded-lg border border-border hover:bg-accent transition-colors"
-                  >
-                  <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-semibold text-foreground">{wr.id}</h3>
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                        {wr.participants.length} participant{wr.participants.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                    <p className="text-sm text-muted-foreground">
-                      Participants: {wr.participants.join(", ") || "None"}
-                  </p>
-                  {wr.incident_id && (
-                      <p className="text-xs text-muted-foreground mt-1 font-mono">
-                      Incident: {wr.incident_id}
-                    </p>
-                  )}
-                  </button>
-                ))}
-                </div>
             </div>
           </Card>
         )}
 
-        {/* Timeline Feed */}
-        <div className="h-[600px] animate-in fade-in duration-500 delay-200">
-          <TimelineFeed
-            events={timelineEvents}
-            filter={timelineFilter}
-            onFilterChange={setTimelineFilter}
-            onClear={() => setTimelineEvents([])}
-          />
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Main Content Area */}
+          <div className="flex-1 space-y-6">
+            {/* Agent Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {loading ? (
+                // Skeleton loaders
+                [1, 2, 3].map((i) => (
+                  <Card key={i} className="p-6 animate-pulse">
+                    <div className="h-4 bg-muted rounded w-24 mb-2"></div>
+                    <div className="h-3 bg-muted rounded w-32"></div>
+                  </Card>
+                ))
+              ) : systemState ? (
+                systemState.agents.map((agent) => (
+                  <AgentCard
+                    key={agent.name}
+                    name={agent.name as "Phill" | "Carl" | "Gary"}
+                    status={agent.status}
+                    domain={agent.domain}
+                    war_room_id={agent.war_room_id}
+                    last_change={agent.last_change}
+                    onOpenWarRoom={() => {
+                      if (agent.war_room_id) {
+                        const warRoom = systemState.war_rooms.find(wr => wr.id === agent.war_room_id);
+                        if (warRoom) handleWarRoomClick(warRoom);
+                      }
+                    }}
+                  />
+                ))
+              ) : null}
+            </div>
+
+            {/* Active War Rooms */}
+            {systemState && systemState.war_rooms.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-lg font-semibold text-foreground">Active War Rooms</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {systemState.war_rooms.map((wr) => {
+                    const participantAgents = systemState.agents.filter(
+                      (agent) => wr.participants.includes(agent.name)
+                    );
+                    
+                    return (
+                      <Card key={wr.id} className="p-4 hover:bg-accent/50 transition-colors">
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <h3 className="font-semibold text-foreground">{wr.id}</h3>
+                            {wr.incident_id && (
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                Incident {wr.incident_id}
+                              </p>
+                            )}
+                          </div>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            wr.status === "active"
+                              ? "bg-blue-100 text-blue-700"
+                              : "bg-gray-100 text-gray-700"
+                          }`}>
+                            {wr.status === "active" ? "Active" : "Resolved"}
+                          </span>
+                        </div>
+
+                        {/* Participants with avatars */}
+                        <div className="flex items-center gap-2 mb-3">
+                          {participantAgents.map((agent) => (
+                            <div
+                              key={agent.name}
+                              className="relative w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary"
+                              title={agent.name}
+                            >
+                              {agent.name.charAt(0)}
+                              <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-background ${
+                                agent.status === "incident" ? "bg-red-500" :
+                                agent.status === "active" ? "bg-amber-500" :
+                                "bg-green-500"
+                              }`} />
+                            </div>
+                          ))}
+                          <span className="text-xs text-muted-foreground ml-1">
+                            {wr.participants.length} participant{wr.participants.length !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleWarRoomClick(wr)}
+                            className="flex-1"
+                          >
+                            Open
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              navigator.clipboard.writeText(wr.id);
+                              showNotification("War room ID copied", "success");
+                            }}
+                          >
+                            Copy invite
+                          </Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Rail: Timeline Feed (Desktop) */}
+          <div className="lg:w-[400px] xl:w-[450px]">
+            <div className="lg:sticky lg:top-[180px]">
+              <TimelineFeed
+                events={timelineEvents}
+                agentFilter={agentFilter}
+                severityFilter={severityFilter}
+                searchQuery={searchQuery}
+                onClear={() => setTimelineEvents([])}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -437,6 +626,7 @@ export default function Home() {
         }}
         warRoom={selectedWarRoom}
         agents={systemState?.agents || []}
+        timelineEvents={timelineEvents}
       />
     </div>
   );
